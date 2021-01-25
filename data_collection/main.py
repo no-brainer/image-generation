@@ -1,15 +1,23 @@
+from enum import Enum
 import os
 import zipfile
 
 import cv2.cv2 as cv2  # this is the same as import cv2, but avoids warnings in pycharm
 
-from utils.img_scraping import Scraper
+from utils.img_scraping import GoogleImagesScraper
 from utils.query_queue import QueryQueue
+
 
 TMP_FOLDER = "../imgs"
 READY_ZIP = "../imgs/data.zip"
 
 FINAL_IMG_DIMENSIONS = (64, 64)
+
+
+class Key(Enum):
+    NEXT_IMAGE = ord('d')
+    NEXT_QUERY = ord('s')
+    END_SESSION = ord('q')
 
 
 class ImageCollection:
@@ -21,6 +29,8 @@ class ImageCollection:
         self.is_crop_ready = False
 
         self.window_name = "Dataset prep"
+
+        self.scraper_cls = GoogleImagesScraper
 
         cv2.namedWindow(self.window_name)
         cv2.setMouseCallback(self.window_name, self.on_mouse_event)
@@ -68,50 +78,50 @@ class ImageCollection:
         self.cur_img_idx += 1
         os.remove(tmp_file)
 
-    def img_prep(self):
-        scraper = Scraper()
-        queries = QueryQueue()
-        for query in queries.get_all():
-            is_new_query_requested = False
-            for img in scraper.traverse_images(query):
-                self.is_crop_ready = False
-                is_done = False
-                while not is_done:
-                    img_cpy = img
-                    if len(self.face_bbox) == 2:
-                        img_cpy = img.copy()
-                        cv2.rectangle(img_cpy, self.face_bbox[0], self.face_bbox[1], (0, 255, 0), 2)
-                        if self.is_crop_ready:
-                            x1, y1 = self.face_bbox[0]
-                            x2, y2 = self.face_bbox[1]
+    def crop_image(self, img):
+        x1, y1 = self.face_bbox[0]
+        x2, y2 = self.face_bbox[1]
 
-                            if x1 > x2:
-                                x1, x2 = x2, x1
-                            if y1 > y2:
-                                y1, y2 = y2, y1
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if y1 > y2:
+            y1, y2 = y2, y1
 
-                            cropped_region = img[y1:y2, x1:x2]
-                            cropped_region = cv2.resize(cropped_region, FINAL_IMG_DIMENSIONS)
+        cropped_region = img[y1:y2, x1:x2]
+        cropped_region = cv2.resize(cropped_region, FINAL_IMG_DIMENSIONS)
 
-                            self.write_out(cropped_region)
+        self.write_out(cropped_region)
 
-                            self.is_crop_ready = False
-                            self.face_bbox = []
+    def label_query_images(self, query, scraper):
+        for img in scraper.provide_images(query):
+            self.is_crop_ready = False
+            is_done = False
+            while not is_done:
+                img_cpy = img
+                if len(self.face_bbox) == 2:
+                    img_cpy = img.copy()
+                    cv2.rectangle(img_cpy, self.face_bbox[0], self.face_bbox[1], (0, 255, 0), 2)
+                    if self.is_crop_ready:
+                        self.crop_image(img)
+                        self.is_crop_ready = False
+                        self.face_bbox = []
 
-                    cv2.imshow(self.window_name, img_cpy)
+                cv2.imshow(self.window_name, img_cpy)
+                key = cv2.waitKey(1) & 0xFF
+                if key in [Key.END_SESSION.value, Key.NEXT_QUERY.value]:
+                    return key == Key.END_SESSION.value
+                elif key == Key.NEXT_IMAGE.value:
+                    is_done = True
+        return False
 
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord("w"):
-                        return
-                    elif key == ord("s"):
-                        is_done = True
-                        is_new_query_requested = True
-                    elif key == ord("d"):
-                        is_done = True
-
-                if is_new_query_requested:
+    def resume_session(self):
+        with self.scraper_cls() as scraper:
+            queries = QueryQueue()
+            for query in queries.get_all():
+                is_session_ending = self.label_query_images(query, scraper)
+                if is_session_ending is True:
                     break
 
 
 if __name__ == "__main__":
-    ImageCollection().img_prep()
+    ImageCollection().resume_session()

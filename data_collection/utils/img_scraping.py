@@ -19,23 +19,27 @@ def check_base64(source):
     return False, None
 
 
-class Scraper:
+class GoogleImagesScraper:
     def __init__(self):
         options = webdriver.ChromeOptions()
         options.add_argument("--ignore-certificate-errors")
         options.add_argument("--incognito")
         options.add_argument("--headless")
 
-        self.driver = webdriver.Chrome(options=options)
+        self.options = options
 
         self.sleep_time = 0.3
         self.max_load_wait = 5.0
         self.click_wait = 0.3
 
-    def __del__(self):
+    def __enter__(self):
+        self.driver = webdriver.Chrome(options=self.options)
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
         self.driver.close()
 
-    def get_gsearch_images(self, query):
+    def _get_image_resources(self, query):
         self.driver.get("https://www.google.com/imghp?hl=en")
 
         search_bar = WebDriverWait(self.driver, self.max_load_wait).until(
@@ -78,8 +82,8 @@ class Scraper:
 
             yield img_element.get_attribute("src")
 
-    def traverse_images(self, query):
-        for img_source in self.get_gsearch_images(query):
+    def provide_images(self, query):
+        for img_source in self._get_image_resources(query):
             # img_source is either base64 or a link
             is_base64, result = check_base64(img_source)
 
