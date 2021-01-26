@@ -1,5 +1,6 @@
 from enum import Enum
 import os
+import time
 import zipfile
 
 import cv2.cv2 as cv2  # this is the same as import cv2, but avoids warnings in pycharm
@@ -22,8 +23,6 @@ class Key(Enum):
 
 class ImageCollection:
     def __init__(self):
-        with zipfile.ZipFile(READY_ZIP, "a") as zip_file:
-            self.cur_img_idx = len(zip_file.namelist())
         self.face_bbox = []
         self.is_drawing = False
         self.is_crop_ready = False
@@ -70,12 +69,14 @@ class ImageCollection:
             self.is_drawing = False
             self.is_crop_ready = True
 
-    def write_out(self, img):
+    def write_out(self, img, folder_name):
         tmp_file = os.path.join(TMP_FOLDER, "tmp.png")
         cv2.imwrite(tmp_file, img)
         with zipfile.ZipFile(READY_ZIP, "a") as zip_file:
-            zip_file.write(tmp_file, f"img{self.cur_img_idx}.png")
-        self.cur_img_idx += 1
+            zip_file.write(
+                tmp_file,
+                os.path.join(folder_name, f"img{int(time.time())}.png")
+            )
         os.remove(tmp_file)
 
     def crop_image(self, img):
@@ -90,7 +91,7 @@ class ImageCollection:
         cropped_region = img[y1:y2, x1:x2]
         cropped_region = cv2.resize(cropped_region, FINAL_IMG_DIMENSIONS)
 
-        self.write_out(cropped_region)
+        return cropped_region
 
     def label_query_images(self, query, scraper):
         for img in scraper.provide_images(query):
@@ -102,7 +103,8 @@ class ImageCollection:
                     img_cpy = img.copy()
                     cv2.rectangle(img_cpy, self.face_bbox[0], self.face_bbox[1], (0, 255, 0), 2)
                     if self.is_crop_ready:
-                        self.crop_image(img)
+                        cropped_img = self.crop_image(img)
+                        self.write_out(cropped_img, query)
                         self.is_crop_ready = False
                         self.face_bbox = []
 
